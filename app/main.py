@@ -62,12 +62,14 @@ async def lifespan(app: FastAPI):
         
         # Initialize context synthesizer
         context_synthesizer = ContextSynthesizer(settings)
+        await context_synthesizer.initialize()
         
         # Initialize query router
         query_router = QueryRouter(settings)
         
         # Initialize data ingestion with enhanced components
         data_ingestion = DataIngestion(vector_search, graph_search, settings, ontology_manager, cross_reference_manager)
+        await data_ingestion.initialize()
         
         logger.info("All components initialized successfully")
         yield
@@ -85,6 +87,8 @@ async def lifespan(app: FastAPI):
             await ontology_manager.close()
         if cross_reference_manager:
             await cross_reference_manager.close()
+        if data_ingestion:
+            await data_ingestion.close()
 
 # Create FastAPI app
 app = FastAPI(

@@ -304,7 +304,13 @@ class DataIngestion:
         # Extract entities using spaCy if available
         if self.nlp and content:
             try:
-                doc = self.nlp(content)
+                # Use executor to avoid blocking the event loop
+                loop = asyncio.get_event_loop()
+                doc = await loop.run_in_executor(
+                    None,  # Use default executor
+                    self.nlp,
+                    content
+                )
                 
                 for ent in doc.ents:
                     if ent.label_ in self.entity_types:
@@ -389,7 +395,13 @@ class DataIngestion:
             return []
         
         try:
-            embeddings = self.embedding_model.encode(chunks)
+            # Use executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            embeddings = await loop.run_in_executor(
+                None,  # Use default executor
+                self.embedding_model.encode,
+                chunks
+            )
             return embeddings.tolist()
         except Exception as e:
             logger.error(f"Embedding generation error: {e}")
@@ -506,7 +518,14 @@ class DataIngestion:
                 if processed_doc.embeddings and i < len(processed_doc.embeddings):
                     embedding = processed_doc.embeddings[i]
                 elif self.embedding_model:
-                    embedding = self.embedding_model.encode([chunk])[0].tolist()
+                    # Use executor to avoid blocking the event loop
+                    loop = asyncio.get_event_loop()
+                    embedding = await loop.run_in_executor(
+                        None,  # Use default executor
+                        self.embedding_model.encode,
+                        [chunk]
+                    )
+                    embedding = embedding[0].tolist()
                 
                 if embedding:
                     point_id = f"{processed_doc.id}_{i}"

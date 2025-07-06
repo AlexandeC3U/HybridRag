@@ -199,6 +199,67 @@ class GraphSearch:
             logger.error(f"Failed to add document to graph: {e}")
             return False
             
+    async def ingest_graph_data(self, nodes: List[Dict[str, Any]], relationships: List[Dict[str, Any]]) -> bool:
+        """Ingest graph data (nodes and relationships) into the database"""
+        try:
+            # Create nodes
+            for node in nodes:
+                node_id = node.get('id')
+                node_type = node.get('type', 'Node')
+                
+                # Build node properties
+                properties = {k: v for k, v in node.items() if k not in ['id', 'type']}
+                
+                # Create node query
+                if node_type == 'Document':
+                    query = """
+                    MERGE (d:Document {id: $node_id})
+                    SET d += $properties
+                    """
+                elif node_type == 'Entity':
+                    query = """
+                    MERGE (e:Entity {id: $node_id})
+                    SET e += $properties
+                    """
+                else:
+                    query = f"""
+                    MERGE (n:{node_type} {{id: $node_id}})
+                    SET n += $properties
+                    """
+                
+                await self._execute_write_query(query, {
+                    "node_id": node_id,
+                    "properties": properties
+                })
+            
+            # Create relationships
+            for rel in relationships:
+                source = rel.get('source')
+                target = rel.get('target')
+                relation = rel.get('relation', 'RELATES_TO')
+                metadata = rel.get('metadata', {})
+                
+                # Create relationship query
+                query = f"""
+                MATCH (source {{id: $source}})
+                MATCH (target {{id: $target}})
+                MERGE (source)-[r:{relation}]->(target)
+                SET r += $metadata
+                """
+                
+                await self._execute_write_query(query, {
+                    "source": source,
+                    "target": target,
+                    "metadata": metadata
+                })
+            
+            logger.info(f"Ingested {len(nodes)} nodes and {len(relationships)} relationships to graph")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest graph data: {e}")
+            return False
+            
     async def search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search the knowledge graph"""
         try:
@@ -391,6 +452,44 @@ class GraphSearch:
         except Exception as e:
             logger.error(f"Failed to clear graph database: {e}")
             return False
+            
+    async def delete_document(self, document_id: str) -> bool:
+        """Delete a document and its associated entities from the graph"""
+        try:
+            # Delete document and all its relationships
+            delete_query = """
+            MATCH (d:Document {id: $doc_id})
+            OPTIONAL MATCH (d)-[r]-()
+            DELETE r
+            DELETE d
+            """
+            
+            await self._execute_write_query(delete_query, {
+                "doc_id": document_id
+            })
+            
+            logger.info(f"Deleted document {document_id} from graph")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete document from graph: {e}")
+            return False
+            
+    async def get_all_entities(self) -> List[Dict[str, Any]]:
+        """Get all entities from the graph database"""
+        try:
+            query = """
+            MATCH (e:Entity)
+            RETURN e.name as name, e.type as type, e.description as description,
+                   e.id as id, e.confidence as confidence
+            """
+            
+            results = await self._execute_query(query)
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to get all entities: {e}")
+            return []
             
     async def close(self):
         """Close the database connection"""

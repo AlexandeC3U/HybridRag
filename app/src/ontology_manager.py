@@ -407,6 +407,40 @@ class OntologyManager:
         
         return hierarchical_context
     
+    async def get_concept_data(self, concept_name: str) -> Optional[Dict[str, Any]]:
+        """Get concept data by name"""
+        try:
+            concept_id = f"concept_{concept_name.lower().replace(' ', '_')}"
+            if concept_id in self.concepts:
+                concept = self.concepts[concept_id]
+                return {
+                    "id": concept.id,
+                    "name": concept.name,
+                    "description": concept.description,
+                    "confidence": concept.confidence
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get concept data: {e}")
+            return None
+    
+    async def get_concept_relationships(self, concept_name: str) -> List[Dict[str, Any]]:
+        """Get relationships for a concept"""
+        try:
+            return await self.find_related_concepts(concept_name)
+        except Exception as e:
+            logger.error(f"Failed to get concept relationships: {e}")
+            return []
+    
+    async def get_concept_hierarchy(self, concept_name: str, max_depth: int = 2) -> List[str]:
+        """Get hierarchical relationships for a concept"""
+        try:
+            concept_id = f"concept_{concept_name.lower().replace(' ', '_')}"
+            return await self._get_hierarchical_relationships(concept_id, max_depth)
+        except Exception as e:
+            logger.error(f"Failed to get concept hierarchy: {e}")
+            return []
+    
     async def close(self):
         """Clean up resources"""
         try:

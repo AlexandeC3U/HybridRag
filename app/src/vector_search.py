@@ -140,6 +140,53 @@ class VectorSearch:
             logger.error(f"Failed to add documents: {e}")
             raise
             
+    async def upsert_points(self, points: List[Dict[str, Any]]) -> bool:
+        """Upsert points to the vector store"""
+        try:
+            # Convert points to PointStruct format
+            point_structs = []
+            for point in points:
+                point_struct = PointStruct(
+                    id=point['id'],
+                    vector=point['vector'],
+                    payload=point['payload']
+                )
+                point_structs.append(point_struct)
+            
+            # Upload points to Qdrant
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self.executor,
+                self.client.upsert,
+                collection_name=self.settings.qdrant_collection_name,
+                points=point_structs
+            )
+            
+            logger.info(f"Upserted {len(points)} points to vector store")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to upsert points: {e}")
+            return False
+            
+    async def get_all_documents(self) -> List[Any]:
+        """Get all documents from the vector store"""
+        try:
+            # Get all points from the collection
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                self.executor,
+                self.client.scroll,
+                collection_name=self.settings.qdrant_collection_name,
+                limit=10000  # Adjust based on your needs
+            )
+            
+            return results[0]  # Return the points
+            
+        except Exception as e:
+            logger.error(f"Failed to get all documents: {e}")
+            return []
+            
     async def search(self, query: str, limit: int = 10, 
                     filter_conditions: Optional[Dict[str, Any]] = None) -> List[Any]:
         """Search for similar documents"""

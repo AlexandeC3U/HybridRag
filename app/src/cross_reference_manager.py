@@ -98,9 +98,7 @@ class CrossReferenceManager:
     async def _get_all_vector_documents(self) -> List[Any]:
         """Get all documents from vector database"""
         try:
-            # This would need to be implemented in vector_search
-            # For now, return empty list
-            return []
+            return await self.vector_search.get_all_documents()
         except Exception as e:
             logger.error(f"Failed to get vector documents: {e}")
             return []
@@ -108,14 +106,7 @@ class CrossReferenceManager:
     async def _get_all_graph_entities(self) -> List[Dict[str, Any]]:
         """Get all entities from graph database"""
         try:
-            query = """
-            MATCH (e:Entity)
-            RETURN e.id as id, e.name as name, e.type as type, e.description as description
-            """
-            
-            results = await self.graph_search._execute_query(query)
-            return results
-            
+            return await self.graph_search.get_all_entities()
         except Exception as e:
             logger.error(f"Failed to get graph entities: {e}")
             return []
