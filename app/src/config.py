@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     
     # Ollama Configuration (for local LLM)
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama2"
+    ollama_model: str = "llama2:7b-chat-q4_0"
+    ollama_embedding_model: str = "nomic-embed-text"
     
     # Embedding Configuration
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -35,6 +36,9 @@ class Settings(BaseSettings):
     # Context Synthesis Configuration
     max_context_length: int = 4000
     context_overlap: int = 200
+    
+    # Reranking Configuration
+    enable_reranking: bool = True
     
     # Query Router Configuration
     entity_extraction_threshold: float = 0.5
@@ -107,5 +111,6 @@ class Settings(BaseSettings):
             return {
                 "provider": "ollama",
                 "base_url": self.ollama_base_url,
-                "model": self.ollama_model
+                "model": self.ollama_model,
+                "embedding_model": self.ollama_embedding_model
             }

@@ -56,8 +56,9 @@ class QueryRouter:
             "show me", "tell me about", "information about"
         ]
         
-    async def route_query(self, query: str, strategy_hint: str = "auto") -> str:
-        """Route query to appropriate search strategy"""
+    async def route_query(self, query: str, strategy_hint: str = "auto", 
+                         context: Dict[str, Any] = None) -> str:
+        """Route query to appropriate search strategy with context awareness"""
         try:
             # If strategy is explicitly specified, use it
             if strategy_hint in ["vector", "graph", "hybrid"]:
@@ -66,19 +67,107 @@ class QueryRouter:
             # Analyze query to determine best strategy
             analysis = await self._analyze_query(query)
             
-            # Decision logic
-            if analysis["entity_density"] > 0.3 and analysis["graph_indicators"] > 0:
-                return "graph"
-            elif analysis["vector_indicators"] > analysis["graph_indicators"]:
-                return "vector"
-            elif analysis["entity_count"] > 2 or analysis["graph_indicators"] > 1:
-                return "hybrid"
-            else:
-                return "vector"  # Default to vector search
+            # Enhanced decision logic with context awareness
+            strategy = await self._determine_strategy_with_context(query, analysis, context)
+            
+            logger.info(f"Query '{query}' routed to '{strategy}' strategy")
+            return strategy
                 
         except Exception as e:
             logger.error(f"Query routing failed: {e}")
             return "vector"  # Fallback to vector search
+    
+    async def _determine_strategy_with_context(self, query: str, analysis: Dict[str, Any], 
+                                             context: Dict[str, Any] = None) -> str:
+        """Determine strategy with context awareness"""
+        
+        # Base scoring
+        vector_score = analysis["vector_indicators"] * 2
+        graph_score = analysis["graph_indicators"] * 2
+        entity_score = analysis["entity_count"] * 1.5
+        
+        # Context-aware adjustments
+        if context:
+            # Previous query context
+            if context.get("previous_strategy") == "graph":
+                graph_score += 1
+            elif context.get("previous_strategy") == "vector":
+                vector_score += 1
+            
+            # User preference context
+            if context.get("user_preference") == "detailed":
+                graph_score += 2
+            elif context.get("user_preference") == "semantic":
+                vector_score += 2
+            
+            # Domain context
+            domain = context.get("domain", "")
+            if domain in ["technical", "scientific", "medical"]:
+                graph_score += 1.5
+            elif domain in ["creative", "general"]:
+                vector_score += 1.5
+        
+        # Query intent analysis
+        intent = await self._analyze_query_intent(query)
+        if intent == "relationship":
+            graph_score += 3
+        elif intent == "definition":
+            vector_score += 2
+        elif intent == "comparison":
+            graph_score += 2
+            vector_score += 1
+        
+        # Complexity-based adjustment
+        if analysis["complexity"] == "complex":
+            return "hybrid"
+        elif analysis["complexity"] == "medium":
+            if abs(vector_score - graph_score) < 2:
+                return "hybrid"
+        
+        # Final decision
+        if graph_score > vector_score + 2:
+            return "graph"
+        elif vector_score > graph_score + 2:
+            return "vector"
+        else:
+            return "hybrid"
+    
+    async def _analyze_query_intent(self, query: str) -> str:
+        """Analyze the intent behind the query"""
+        query_lower = query.lower()
+        
+        # Relationship intent
+        relationship_indicators = [
+            "relationship", "related", "connected", "link", "association",
+            "how does", "what connects", "relationship between"
+        ]
+        
+        # Definition intent
+        definition_indicators = [
+            "what is", "define", "definition", "meaning", "explain",
+            "describe", "tell me about"
+        ]
+        
+        # Comparison intent
+        comparison_indicators = [
+            "compare", "difference", "similar", "versus", "vs",
+            "contrast", "better", "worse"
+        ]
+        
+        # Count indicators
+        relationship_count = sum(1 for indicator in relationship_indicators if indicator in query_lower)
+        definition_count = sum(1 for indicator in definition_indicators if indicator in query_lower)
+        comparison_count = sum(1 for indicator in comparison_indicators if indicator in query_lower)
+        
+        # Determine intent
+        if relationship_count > definition_count and relationship_count > comparison_count:
+            return "relationship"
+        elif definition_count > relationship_count and definition_count > comparison_count:
+            return "definition"
+        elif comparison_count > 0:
+            return "comparison"
+        else:
+            return "general"
             
     async def _analyze_query(self, query: str) -> Dict[str, Any]:
         """Analyze query characteristics"""

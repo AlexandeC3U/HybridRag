@@ -32,10 +32,12 @@ class DataIngestion:
     Handles document processing and ingestion into vector and graph databases
     """
     
-    def __init__(self, vector_search, graph_search, settings):
+    def __init__(self, vector_search, graph_search, settings, ontology_manager=None, cross_reference_manager=None):
         self.vector_search = vector_search
         self.graph_search = graph_search
         self.settings = settings
+        self.ontology_manager = ontology_manager
+        self.cross_reference_manager = cross_reference_manager
         
         # Configuration
         self.chunk_size = getattr(settings, 'CHUNK_SIZE', 1000)
@@ -147,6 +149,10 @@ class DataIngestion:
                 if graph_success:
                     results['graph_ingestions'] += 1
                 
+                # Create cross-references if both ingestions were successful
+                if vector_success and graph_success and self.cross_reference_manager:
+                    await self._create_cross_references(processed_doc)
+                
                 if vector_success or graph_success:
                     results['successful_ingestions'] += 1
                 else:
@@ -190,6 +196,11 @@ class DataIngestion:
         embeddings = None
         if self.embedding_model:
             embeddings = await self._generate_embeddings(chunks)
+        
+        # Create ontological concepts if ontology manager is available
+        ontological_concepts = []
+        if self.ontology_manager:
+            ontological_concepts = await self._create_ontological_concepts(entities, content)
         
         return ProcessedDocument(
             id=doc_id,
@@ -383,6 +394,101 @@ class DataIngestion:
         except Exception as e:
             logger.error(f"Embedding generation error: {e}")
             return []
+    
+    async def _create_ontological_concepts(self, entities: List[Dict[str, Any]], content: str) -> List[str]:
+        """Create ontological concepts from entities and content"""
+        try:
+            if not self.ontology_manager:
+                return []
+            
+            concept_ids = []
+            
+            # Create concepts for each entity
+            for entity in entities:
+                entity_name = entity.get("text", "")
+                entity_type = entity.get("label", "")
+                
+                if entity_name:
+                    # Create concept with description from context
+                    description = await self._extract_entity_description(content, entity_name)
+                    
+                    concept_id = await self.ontology_manager.add_concept(
+                        name=entity_name,
+                        description=description
+                    )
+                    concept_ids.append(concept_id)
+            
+            # Create higher-level concepts based on entity types
+            type_concepts = {}
+            for entity in entities:
+                entity_type = entity.get("label", "")
+                if entity_type and entity_type not in type_concepts:
+                    type_concept_id = await self.ontology_manager.add_concept(
+                        name=entity_type,
+                        description=f"Category of {entity_type} entities"
+                    )
+                    type_concepts[entity_type] = type_concept_id
+                    concept_ids.append(type_concept_id)
+            
+            return concept_ids
+            
+        except Exception as e:
+            logger.error(f"Failed to create ontological concepts: {e}")
+            return []
+    
+    async def _extract_entity_description(self, content: str, entity_name: str) -> str:
+        """Extract description of an entity from content"""
+        try:
+            # Find sentences containing the entity
+            sentences = content.split('.')
+            entity_sentences = []
+            
+            for sentence in sentences:
+                if entity_name.lower() in sentence.lower():
+                    entity_sentences.append(sentence.strip())
+            
+            # Return the first sentence that mentions the entity
+            if entity_sentences:
+                return entity_sentences[0][:200] + "..."  # Limit length
+            
+            return f"Entity: {entity_name}"
+            
+        except Exception as e:
+            logger.error(f"Failed to extract entity description: {e}")
+            return f"Entity: {entity_name}"
+    
+    async def _create_cross_references(self, processed_doc: ProcessedDocument):
+        """Create cross-references between vector and graph data"""
+        try:
+            if not self.cross_reference_manager:
+                return
+            
+            # For each chunk in the vector database, create cross-references to graph entities
+            for i, chunk in enumerate(processed_doc.chunks):
+                vector_doc_id = f"{processed_doc.id}_{i}"
+                
+                # Find entities mentioned in this chunk
+                chunk_entities = []
+                for entity in processed_doc.entities:
+                    if entity.get("text", "").lower() in chunk.lower():
+                        chunk_entities.append(entity)
+                
+                # Create cross-references for each entity
+                for entity in chunk_entities:
+                    entity_id = f"entity_{hashlib.md5(entity['text'].encode()).hexdigest()[:8]}"
+                    
+                    await self.cross_reference_manager.add_cross_reference(
+                        vector_doc_id=vector_doc_id,
+                        graph_entity_id=entity_id,
+                        relationship_type="MENTIONS",
+                        confidence=entity.get("confidence", 0.8),
+                        evidence=f"Entity '{entity['text']}' found in document chunk"
+                    )
+            
+            logger.info(f"Created cross-references for document {processed_doc.id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to create cross-references: {e}")
     
     async def _ingest_to_vector_db(self, processed_doc: ProcessedDocument) -> bool:
         """Ingest processed document into vector database"""

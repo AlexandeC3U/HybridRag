@@ -44,13 +44,16 @@ class ContextSynthesizer:
             logger.error(f"Failed to initialize context synthesizer: {e}")
             raise
 
-    async def synthesize(self, query: str, search_results: Dict[str, Any]) -> Dict[str, Any]:
+    async def synthesize(self, query: str, search_results: Dict[str, Any], 
+                        ontology_manager=None, cross_reference_manager=None) -> Dict[str, Any]:
         """
-        Synthesize context from vector and graph search results
+        Synthesize context from vector and graph search results with ontology enhancement
         
         Args:
             query: The user's query
             search_results: Dict containing 'vector' and 'graph' results
+            ontology_manager: Optional ontology manager for concept enhancement
+            cross_reference_manager: Optional cross-reference manager
             
         Returns:
             Dict with synthesized context, sources, and confidence
@@ -59,6 +62,14 @@ class ContextSynthesizer:
             # Extract results from both sources
             vector_results = search_results.get('vector', [])
             graph_results = search_results.get('graph', [])
+            
+            # Enhanced synthesis with cross-references
+            if cross_reference_manager:
+                enhanced_results = await cross_reference_manager.enhance_search_results(
+                    query, vector_results, graph_results
+                )
+                vector_results = enhanced_results.get("vector_results", vector_results)
+                graph_results = enhanced_results.get("graph_results", graph_results)
             
             # Convert to unified format
             unified_results = []
@@ -85,8 +96,8 @@ class ContextSynthesizer:
             # Select top results and build context
             selected_results = await self._select_top_results(reranked_results)
             
-            # Build final context
-            context = await self._build_context(selected_results)
+            # Build final context with ontology enhancement
+            context = await self._build_enhanced_context(selected_results, query, ontology_manager)
             
             # Calculate overall confidence
             confidence = await self._calculate_confidence(selected_results, vector_results, graph_results)
@@ -94,22 +105,109 @@ class ContextSynthesizer:
             # Prepare sources for response
             sources = await self._prepare_sources(selected_results)
             
+            # Add ontological enhancements
+            ontological_info = {}
+            if ontology_manager:
+                ontological_info = await self._get_ontological_enhancements(
+                    query, selected_results, ontology_manager
+                )
+            
             return {
                 'context': context,
                 'sources': sources,
                 'confidence': confidence,
+                'ontological_enhancements': ontological_info,
                 'synthesis_info': {
-                    'method': 'hybrid_synthesis',
+                    'method': 'enhanced_hybrid_synthesis',
                     'vector_count': len(vector_results),
                     'graph_count': len(graph_results),
                     'final_count': len(selected_results),
-                    'deduplicated_count': len(deduplicated_results)
+                    'deduplicated_count': len(deduplicated_results),
+                    'ontology_enhanced': ontology_manager is not None
                 }
             }
             
         except Exception as e:
             logger.error(f"Context synthesis error: {e}")
             raise
+    
+    async def _build_enhanced_context(self, selected_results: List[SynthesizedResult], 
+                                    query: str, ontology_manager=None) -> str:
+        """Build enhanced context with ontological knowledge"""
+        try:
+            # Build base context
+            base_context = await self._build_context(selected_results)
+            
+            if not ontology_manager:
+                return base_context
+            
+            # Extract concepts from query and results
+            query_concepts = await self._extract_concepts_from_text(query)
+            result_concepts = await self._extract_concepts_from_results(selected_results)
+            
+            # Get ontological enhancements
+            ontological_enhancements = []
+            for concept in query_concepts + result_concepts:
+                related_concepts = await ontology_manager.find_related_concepts(concept)
+                if related_concepts:
+                    ontological_enhancements.extend(related_concepts)
+            
+            # Build enhanced context
+            enhanced_parts = [base_context]
+            
+            if ontological_enhancements:
+                enhancement_text = "Related concepts: " + ", ".join([
+                    f"{c['name']} ({c['description']})" 
+                    for c in ontological_enhancements[:5]  # Limit to top 5
+                ])
+                enhanced_parts.append(enhancement_text)
+            
+            return "\n\n---\n\n".join(enhanced_parts)
+            
+        except Exception as e:
+            logger.error(f"Failed to build enhanced context: {e}")
+            return await self._build_context(selected_results)
+    
+    async def _extract_concepts_from_text(self, text: str) -> List[str]:
+        """Extract concept names from text"""
+        # Simple extraction - could be enhanced with NLP
+        words = text.split()
+        return [word for word in words if len(word) > 3]  # Filter short words
+    
+    async def _extract_concepts_from_results(self, results: List[SynthesizedResult]) -> List[str]:
+        """Extract concepts from search results"""
+        concepts = []
+        for result in results:
+            content_words = result.content.split()
+            concepts.extend([word for word in content_words if len(word) > 3])
+        return list(set(concepts))
+    
+    async def _get_ontological_enhancements(self, query: str, selected_results: List[SynthesizedResult],
+                                          ontology_manager) -> Dict[str, Any]:
+        """Get ontological enhancements for the query and results"""
+        try:
+            query_concepts = await self._extract_concepts_from_text(query)
+            result_concepts = await self._extract_concepts_from_results(selected_results)
+            
+            enhancements = {
+                "query_concepts": query_concepts,
+                "result_concepts": result_concepts,
+                "related_concepts": [],
+                "hierarchical_context": []
+            }
+            
+            # Get related concepts for each concept
+            all_concepts = list(set(query_concepts + result_concepts))
+            for concept in all_concepts:
+                related = await ontology_manager.find_related_concepts(concept)
+                if related:
+                    enhancements["related_concepts"].extend(related)
+            
+            return enhancements
+            
+        except Exception as e:
+            logger.error(f"Failed to get ontological enhancements: {e}")
+            return {}
 
     async def _process_vector_results(self, vector_results: List[Any]) -> List[SynthesizedResult]:
         """Process vector search results into unified format"""

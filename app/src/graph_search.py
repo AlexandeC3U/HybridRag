@@ -304,13 +304,43 @@ class GraphSearch:
         
     async def get_entity_relationships(self, entity_name: str, max_depth: int = 2) -> List[Dict[str, Any]]:
         """Get relationships for an entity"""
-        query = """
-        MATCH (e:Entity {name: $entity_name})
-        CALL apoc.path.expand(e, "CO_OCCURS_WITH", null, 1, $max_depth)
-        YIELD path
-        RETURN [n in nodes(path) | n.name] as entity_path,
-               [r in relationships(path) | r.weight] as weights
-        """
+        # First check if APOC is available
+        apoc_check_query = "CALL apoc.help('path') YIELD name LIMIT 1 RETURN count(*) as apoc_available"
+        
+        try:
+            apoc_result = await self._execute_query(apoc_check_query)
+            apoc_available = apoc_result and apoc_result[0]["apoc_available"] > 0
+        except Exception as e:
+            logger.warning(f"APOC procedures not available: {e}")
+            apoc_available = False
+        
+        if apoc_available:
+            # Use APOC for advanced path expansion
+            query = """
+            MATCH (e:Entity {name: $entity_name})
+            CALL apoc.path.expand(e, "CO_OCCURS_WITH", null, 1, $max_depth)
+            YIELD path
+            RETURN [n in nodes(path) | n.name] as entity_path,
+                   [r in relationships(path) | r.weight] as weights
+            """
+        else:
+            # Fallback to basic Cypher without APOC
+            query = """
+            MATCH (e:Entity {name: $entity_name})
+            OPTIONAL MATCH (e)-[r1:CO_OCCURS_WITH]-(e2:Entity)
+            OPTIONAL MATCH (e2)-[r2:CO_OCCURS_WITH]-(e3:Entity)
+            WHERE e3.name <> $entity_name
+            RETURN 
+                CASE 
+                    WHEN e2 IS NOT NULL THEN [e.name, e2.name]
+                    ELSE [e.name]
+                END as entity_path,
+                CASE 
+                    WHEN e2 IS NOT NULL THEN [r1.weight]
+                    ELSE []
+                END as weights
+            LIMIT 10
+            """
         
         try:
             results = await self._execute_query(query, {

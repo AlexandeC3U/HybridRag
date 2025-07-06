@@ -49,17 +49,26 @@ class VectorSearch:
     async def _create_collection(self):
         """Create the vector collection if it doesn't exist"""
         try:
-            collections = self.client.get_collections()
-            collection_names = [c.name for c in collections.collections]
+            # Run synchronous Qdrant operations in executor
+            loop = asyncio.get_event_loop()
             
-            if self.settings.qdrant_collection_name not in collection_names:
-                self.client.create_collection(
-                    collection_name=self.settings.qdrant_collection_name,
-                    vectors_config=VectorParams(
-                        size=self.settings.embedding_dimension,
-                        distance=Distance.COSINE
+            def create_collection_sync():
+                collections = self.client.get_collections()
+                collection_names = [c.name for c in collections.collections]
+                
+                if self.settings.qdrant_collection_name not in collection_names:
+                    self.client.create_collection(
+                        collection_name=self.settings.qdrant_collection_name,
+                        vectors_config=VectorParams(
+                            size=self.settings.embedding_dimension,
+                            distance=Distance.COSINE
+                        )
                     )
-                )
+                    return True
+                return False
+            
+            created = await loop.run_in_executor(self.executor, create_collection_sync)
+            if created:
                 logger.info(f"Created collection: {self.settings.qdrant_collection_name}")
                 
         except Exception as e:
@@ -116,7 +125,10 @@ class VectorSearch:
                 points.append(point)
                 
             # Upload points to Qdrant
-            self.client.upsert(
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self.executor,
+                self.client.upsert,
                 collection_name=self.settings.qdrant_collection_name,
                 points=points
             )
@@ -149,7 +161,10 @@ class VectorSearch:
                 search_filter = Filter(must=conditions)
                 
             # Perform search
-            results = self.client.search(
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                self.executor,
+                self.client.search,
                 collection_name=self.settings.qdrant_collection_name,
                 query_vector=query_embedding,
                 query_filter=search_filter,
