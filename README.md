@@ -29,8 +29,6 @@ https://arxiv.org/pdf/2408.04948
 5. **Context Synthesizer**: Combines results from both sources
 6. **API Gateway**: FastAPI-based REST interface
 
-![image](assets/hybridRAG.png)
-
 ## 📋 Prerequisites
 
 - Docker and Docker Compose
