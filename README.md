@@ -6,8 +6,7 @@
 
 https://www.qed42.com/insights/how-knowledge-graphs-take-rag-beyond-retrieval
 
-https://learnprompting.org/docs/retrieval_augmented_generation/hybridrag?
-srsltid=AfmBOor9RpE8hbFT4Zff1cHvrOIUB902fpG8piRHViBIhU3lGfOn1TRQ
+https://learnprompting.org/docs/retrieval_augmented_generation/hybridrag?srsltid=AfmBOor9RpE8hbFT4Zff1cHvrOIUB902fpG8piRHViBIhU3lGfOn1TRQ
 
 https://arxiv.org/pdf/2408.04948
 
