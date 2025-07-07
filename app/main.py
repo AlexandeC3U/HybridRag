@@ -1,104 +1,47 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from fastapi.responses import JSONResponse
 from typing import List, Optional, Dict, Any
-import logging
+from datetime import datetime, timedelta
+import os
 from contextlib import asynccontextmanager
-import re
 
-from src.query_router import QueryRouter
-from src.vector_search import VectorSearch
-from src.graph_search import GraphSearch
-from src.context_synthesizer import ContextSynthesizer
-from src.llm_interface import LLMInterface
-from src.data_ingestion import DataIngestion
-from src.ontology_manager import OntologyManager
-from src.cross_reference_manager import CrossReferenceManager
-from src.config import Settings
+from models import (
+    AssetHierarchy, SensorData, SensorReading, 
+    HealthStatus, TopicStructure, AssetCreate, SensorCreate
+)
+from database import Neo4jManager, InfluxDBManager
+from mqtt_client import MQTTPublisher
+from topic_generator import TopicGenerator
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize settings
-settings = Settings()
-
-# Global variables for components
-query_router: QueryRouter = None
-vector_search: VectorSearch = None
-graph_search: GraphSearch = None
-context_synthesizer: ContextSynthesizer = None
-llm_interface: LLMInterface = None
-data_ingestion: DataIngestion = None
-ontology_manager: OntologyManager = None
-cross_reference_manager: CrossReferenceManager = None
+# Database managers
+neo4j_manager = Neo4jManager()
+influxdb_manager = InfluxDBManager()
+mqtt_publisher = MQTTPublisher()
+topic_generator = TopicGenerator(neo4j_manager)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize components on startup"""
-    global query_router, vector_search, graph_search, context_synthesizer, llm_interface, data_ingestion, ontology_manager, cross_reference_manager
-    
-    try:
-        logger.info("Initializing hybrid RAG system components...")
-        
-        # Initialize vector search
-        vector_search = VectorSearch(settings)
-        await vector_search.initialize()
-        
-        # Initialize graph search
-        graph_search = GraphSearch(settings)
-        await graph_search.initialize()
-        
-        # Initialize ontology manager
-        ontology_manager = OntologyManager(graph_search, settings)
-        await ontology_manager.initialize()
-        
-        # Initialize cross-reference manager
-        cross_reference_manager = CrossReferenceManager(vector_search, graph_search, ontology_manager, settings)
-        await cross_reference_manager.initialize()
-        
-        # Initialize LLM interface
-        llm_interface = LLMInterface(settings)
-        
-        # Initialize context synthesizer
-        context_synthesizer = ContextSynthesizer(settings)
-        await context_synthesizer.initialize()
-        
-        # Initialize query router
-        query_router = QueryRouter(settings)
-        
-        # Initialize data ingestion with enhanced components
-        data_ingestion = DataIngestion(vector_search, graph_search, settings, ontology_manager, cross_reference_manager)
-        await data_ingestion.initialize()
-        
-        logger.info("All components initialized successfully")
-        yield
-        
-    except Exception as e:
-        logger.error(f"Failed to initialize components: {e}")
-        raise
-    finally:
-        # Cleanup
-        if vector_search:
-            await vector_search.close()
-        if graph_search:
-            await graph_search.close()
-        if ontology_manager:
-            await ontology_manager.close()
-        if cross_reference_manager:
-            await cross_reference_manager.close()
-        if data_ingestion:
-            await data_ingestion.close()
+    # Startup
+    await neo4j_manager.connect()
+    await influxdb_manager.connect()
+    await mqtt_publisher.connect()
+    print("🚀 UNS Graph PoC API started successfully")
+    yield
+    # Shutdown
+    await neo4j_manager.close()
+    await influxdb_manager.close()
+    await mqtt_publisher.disconnect()
+    print("🛑 UNS Graph PoC API shutdown complete")
 
-# Create FastAPI app
 app = FastAPI(
-    title="Hybrid RAG System",
-    description="A RAG system combining vector search and knowledge graphs",
+    title="UNS Graph PoC API",
+    description="Unified Namespace with Graph Database - REST API",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -107,233 +50,213 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic models with validation
-class QueryRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=1000, description="The query to process")
-    max_results: Optional[int] = Field(default=10, ge=1, le=100, description="Maximum number of results to return")
-    search_strategy: Optional[str] = Field(default="auto", description="Search strategy to use")
-    include_reasoning: Optional[bool] = Field(default=False, description="Whether to include reasoning in response")
-    
-    @validator('search_strategy')
-    def validate_search_strategy(cls, v):
-        allowed_strategies = ["auto", "vector", "graph", "hybrid"]
-        if v not in allowed_strategies:
-            raise ValueError(f"search_strategy must be one of {allowed_strategies}")
-        return v
-    
-    @validator('query')
-    def validate_query(cls, v):
-        # Remove potentially dangerous characters
-        v = re.sub(r'[<>"\']', '', v)
-        if not v.strip():
-            raise ValueError("Query cannot be empty or only whitespace")
-        return v.strip()
-
-class Document(BaseModel):
-    content: str = Field(..., min_length=1, max_length=100000, description="Document content")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Document metadata")
-    entities: Optional[List[str]] = Field(default_factory=list, description="List of entities in the document")
-    
-    @validator('content')
-    def validate_content(cls, v):
-        if not v.strip():
-            raise ValueError("Document content cannot be empty or only whitespace")
-        return v.strip()
-    
-    @validator('entities')
-    def validate_entities(cls, v):
-        if v is None:
-            return []
-        # Validate each entity
-        validated_entities = []
-        for entity in v:
-            if isinstance(entity, str) and entity.strip():
-                validated_entities.append(entity.strip())
-        return validated_entities
-    
-class IngestRequest(BaseModel):
-    documents: List[Document] = Field(..., min_items=1, max_items=1000, description="List of documents to ingest")
-    source: Optional[str] = Field(default="api", max_length=100, description="Source of the documents")
-    
-    @validator('source')
-    def validate_source(cls, v):
-        # Remove potentially dangerous characters
-        v = re.sub(r'[<>"\']', '', v)
-        return v.strip()
-
-class QueryResponse(BaseModel):
-    query: str
-    answer: str
-    sources: List[Dict[str, Any]]
-    strategy_used: str
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    reasoning: Optional[str] = None
-
-@app.get("/health")
+@app.get("/health", response_model=HealthStatus)
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "version": "1.0.0"}
-
-@app.post("/query", response_model=QueryResponse)
-async def query_endpoint(request: QueryRequest):
-    """Main query endpoint for the hybrid RAG system"""
     try:
-        logger.info(f"Received query: {request.query}")
+        neo4j_healthy = await neo4j_manager.health_check()
+        influxdb_healthy = await influxdb_manager.health_check()
+        mqtt_healthy = await mqtt_publisher.health_check()
         
-        # Validate that components are initialized
-        if not all([query_router, vector_search, graph_search, context_synthesizer, llm_interface, ontology_manager, cross_reference_manager]):
-            raise HTTPException(status_code=503, detail="System components not initialized")
+        overall_healthy = neo4j_healthy and influxdb_healthy and mqtt_healthy
         
-        # Route the query to determine search strategy with context
-        try:
-            # Build context for routing
-            routing_context = {
-                "user_preference": request.include_reasoning and "detailed" or "standard",
-                "query_complexity": "complex" if len(request.query.split()) > 10 else "simple"
-            }
-            strategy = await query_router.route_query(request.query, request.search_strategy, routing_context)
-        except Exception as e:
-            logger.error(f"Query routing failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to route query")
-        
-        # Perform search based on strategy
-        try:
-            if strategy == "vector":
-                results = await vector_search.search(request.query, request.max_results)
-                sources = [{"type": "vector", "content": r.payload.get("content", ""), 
-                           "score": r.score, "metadata": r.payload.get("metadata", {})} 
-                          for r in results]
-            elif strategy == "graph":
-                results = await graph_search.search(request.query, request.max_results)
-                sources = [{"type": "graph", "content": r.get("content", ""), 
-                           "score": r.get("score", 0), "metadata": r.get("metadata", {})} 
-                          for r in results]
-            else:  # hybrid
-                vector_results = await vector_search.search(request.query, request.max_results // 2)
-                graph_results = await graph_search.search(request.query, request.max_results // 2)
-                
-                # Combine and synthesize results with enhanced components
-                combined_results = {
-                    "vector": vector_results,
-                    "graph": graph_results
-                }
-                
-                synthesized_context = await context_synthesizer.synthesize(
-                    request.query, combined_results, ontology_manager, cross_reference_manager
-                )
-                
-                sources = synthesized_context.get("sources", [])
-        except Exception as e:
-            logger.error(f"Search failed: {e}")
-            raise HTTPException(status_code=500, detail="Search operation failed")
-        
-        # Generate answer using LLM
-        try:
-            if strategy == "hybrid":
-                context = synthesized_context.get("context", "")
-                confidence = synthesized_context.get("confidence", 0.5)
-            else:
-                context = "\n".join([s["content"] for s in sources])
-                confidence = sum([s["score"] for s in sources]) / len(sources) if sources else 0
-            
-            answer = await llm_interface.generate_answer(
-                request.query, context, sources
-            )
-        except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to generate answer")
-        
-        # Generate reasoning if requested
-        reasoning = None
-        if request.include_reasoning:
-            try:
-                reasoning = await llm_interface.generate_reasoning(
-                    request.query, context, answer, strategy
-                )
-            except Exception as e:
-                logger.error(f"Reasoning generation failed: {e}")
-                # Don't fail the entire request if reasoning fails
-                reasoning = "Failed to generate reasoning"
-        
-        return QueryResponse(
-            query=request.query,
-            answer=answer,
-            sources=sources,
-            strategy_used=strategy,
-            confidence=confidence,
-            reasoning=reasoning
+        return HealthStatus(
+            status="healthy" if overall_healthy else "unhealthy",
+            services={
+                "neo4j": "healthy" if neo4j_healthy else "unhealthy",
+                "influxdb": "healthy" if influxdb_healthy else "unhealthy",
+                "mqtt": "healthy" if mqtt_healthy else "unhealthy"
+            },
+            timestamp=datetime.now()
         )
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Query processing error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return HealthStatus(
+            status="error",
+            services={},
+            timestamp=datetime.now(),
+            error=str(e)
+        )
 
-@app.post("/ingest")
-async def ingest_documents(request: IngestRequest):
-    """Ingest documents into both vector and graph databases"""
+# Asset Management Endpoints
+@app.get("/api/v1/assets/hierarchy/{site_name}", response_model=AssetHierarchy)
+async def get_asset_hierarchy(site_name: str):
+    """Get complete asset hierarchy for a site"""
     try:
-        logger.info(f"Ingesting {len(request.documents)} documents")
+        hierarchy = await neo4j_manager.get_asset_hierarchy(site_name)
+        if not hierarchy:
+            raise HTTPException(status_code=404, detail=f"Site '{site_name}' not found")
+        return hierarchy
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve hierarchy: {str(e)}")
+
+@app.post("/api/v1/assets", response_model=Dict[str, str])
+async def create_asset(asset: AssetCreate):
+    """Create a new asset"""
+    try:
+        asset_id = await neo4j_manager.create_asset(asset)
+        return {"asset_id": asset_id, "message": "Asset created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create asset: {str(e)}")
+
+@app.get("/api/v1/assets/{asset_id}")
+async def get_asset(asset_id: str):
+    """Get asset details by ID"""
+    try:
+        asset = await neo4j_manager.get_asset(asset_id)
+        if not asset:
+            raise HTTPException(status_code=404, detail=f"Asset '{asset_id}' not found")
+        return asset
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve asset: {str(e)}")
+
+@app.get("/api/v1/assets/search")
+async def search_assets(
+    query: str = Query(..., description="Search query"),
+    asset_type: Optional[str] = Query(None, description="Filter by asset type"),
+    site: Optional[str] = Query(None, description="Filter by site")
+):
+    """Search assets by name or properties"""
+    try:
+        assets = await neo4j_manager.search_assets(query, asset_type, site)
+        return {"assets": assets, "count": len(assets)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+# Sensor Management Endpoints
+@app.post("/api/v1/sensors", response_model=Dict[str, str])
+async def create_sensor(sensor: SensorCreate):
+    """Create a new sensor"""
+    try:
+        sensor_id = await neo4j_manager.create_sensor(sensor)
+        return {"sensor_id": sensor_id, "message": "Sensor created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create sensor: {str(e)}")
+
+@app.get("/api/v1/sensors/{sensor_id}/data")
+async def get_sensor_data(
+    sensor_id: str,
+    hours: int = Query(24, description="Hours of data to retrieve"),
+    limit: int = Query(1000, description="Maximum number of data points")
+):
+    """Get time-series data for a sensor"""
+    try:
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=hours)
         
-        # Validate that components are initialized
-        if not all([data_ingestion, vector_search, graph_search]):
-            raise HTTPException(status_code=503, detail="System components not initialized")
-        
-        # Validate document sizes
-        total_size = sum(len(doc.content) for doc in request.documents)
-        if total_size > 10_000_000:  # 10MB limit
-            raise HTTPException(status_code=413, detail="Total document size too large")
-        
-        try:
-            results = await data_ingestion.ingest_documents(
-                request.documents, request.source
-            )
-        except Exception as e:
-            logger.error(f"Document ingestion failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to ingest documents")
-        
+        data = await influxdb_manager.get_sensor_data(sensor_id, start_time, end_time, limit)
         return {
-            "message": f"Successfully ingested {len(request.documents)} documents",
-            "results": results
+            "sensor_id": sensor_id,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "data_points": len(data),
+            "data": data
         }
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Document ingestion error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve sensor data: {str(e)}")
 
-@app.get("/stats")
-async def get_system_stats():
-    """Get system statistics"""
+@app.post("/api/v1/sensors/{sensor_id}/data")
+async def ingest_sensor_data(sensor_id: str, data: SensorReading):
+    """Ingest sensor data point"""
     try:
-        vector_stats = await vector_search.get_stats()
-        graph_stats = await graph_search.get_stats()
+        # Store in InfluxDB
+        await influxdb_manager.write_sensor_data(sensor_id, data)
         
-        return {
-            "vector_database": vector_stats,
-            "graph_database": graph_stats,
-            "total_documents": vector_stats.get("total_points", 0)
-        }
+        # Publish to MQTT
+        topic = await topic_generator.generate_sensor_topic(sensor_id)
+        await mqtt_publisher.publish_sensor_data(topic, data)
         
+        return {"message": "Data ingested successfully"}
     except Exception as e:
-        logger.error(f"Stats retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to ingest data: {str(e)}")
 
-@app.delete("/clear")
-async def clear_databases():
-    """Clear all data from both databases (use with caution)"""
+@app.get("/api/v1/sensors/{sensor_id}/latest")
+async def get_latest_sensor_reading(sensor_id: str):
+    """Get the latest reading for a sensor"""
     try:
-        await vector_search.clear_all()
-        await graph_search.clear_all()
-        
-        return {"message": "All databases cleared successfully"}
-        
+        reading = await influxdb_manager.get_latest_reading(sensor_id)
+        if not reading:
+            raise HTTPException(status_code=404, detail=f"No data found for sensor '{sensor_id}'")
+        return reading
     except Exception as e:
-        logger.error(f"Database clearing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve latest reading: {str(e)}")
+
+# Topic Management Endpoints
+@app.get("/api/v1/topics/generate", response_model=List[TopicStructure])
+async def generate_all_topics():
+    """Generate MQTT topics for all sensors"""
+    try:
+        topics = await topic_generator.generate_all_topics()
+        return topics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate topics: {str(e)}")
+
+@app.get("/api/v1/topics/sensor/{sensor_id}")
+async def get_sensor_topic(sensor_id: str):
+    """Get MQTT topic for a specific sensor"""
+    try:
+        topic = await topic_generator.generate_sensor_topic(sensor_id)
+        return {"sensor_id": sensor_id, "topic": topic}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate sensor topic: {str(e)}")
+
+# Analytics Endpoints
+@app.get("/api/v1/analytics/sensors/summary")
+async def get_sensors_summary(site: Optional[str] = None):
+    """Get summary of all sensors"""
+    try:
+        summary = await neo4j_manager.get_sensors_summary(site)
+        return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sensors summary: {str(e)}")
+
+@app.get("/api/v1/analytics/data/quality")
+async def get_data_quality_metrics(
+    hours: int = Query(24, description="Hours to analyze"),
+    site: Optional[str] = Query(None, description="Filter by site")
+):
+    """Get data quality metrics"""
+    try:
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=hours)
+        
+        metrics = await influxdb_manager.get_data_quality_metrics(start_time, end_time, site)
+        return metrics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get data quality metrics: {str(e)}")
+
+# Utility Endpoints
+@app.get("/api/v1/graph/schema")
+async def get_graph_schema():
+    """Get Neo4j graph schema information"""
+    try:
+        schema = await neo4j_manager.get_schema()
+        return schema
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get schema: {str(e)}")
+
+@app.post("/api/v1/graph/query")
+async def execute_cypher_query(query: Dict[str, str]):
+    """Execute a Cypher query (development/debugging only)"""
+    try:
+        if not query.get("cypher"):
+            raise HTTPException(status_code=400, detail="Missing 'cypher' field")
+        
+        # Security check - only allow read operations
+        cypher_query = query["cypher"].strip().upper()
+        if not cypher_query.startswith(("MATCH", "RETURN", "WITH", "OPTIONAL")):
+            raise HTTPException(status_code=400, detail="Only read queries are allowed")
+        
+        results = await neo4j_manager.execute_query(query["cypher"])
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

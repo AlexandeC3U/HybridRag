@@ -1,289 +1,499 @@
-**Hybrid RAG System: Vector + Knowledge Graph**
+# UNS Graph PoC: Unified Namespace with Graph Database
 
-![image](assets/hybridRAG.png)
+A proof-of-concept implementation of a Unified Namespace (UNS) architecture leveraging graph databases for industrial IoT systems. This project demonstrates how to model industrial assets, equipment, and sensors as a connected graph while maintaining high-performance time-series data storage.
 
-**Articles**
+## 🎯 Project Overview
 
-https://www.qed42.com/insights/how-knowledge-graphs-take-rag-beyond-retrieval
+The Unified Namespace (UNS) concept centralizes all industrial data into a single, standardized namespace that enables seamless data exchange between different systems, applications, and stakeholders. This implementation uses a graph database to model the relationships between industrial assets and their hierarchical structure.
 
-https://learnprompting.org/docs/retrieval_augmented_generation/hybridrag?
-srsltid=AfmBOor9RpE8hbFT4Zff1cHvrOIUB902fpG8piRHViBIhU3lGfOn1TRQ
+### Key Features
 
-https://arxiv.org/pdf/2408.04948
-
-## 🚀 Features
-
-- **Hybrid Search**: Combines vector similarity search with knowledge graph relationships
-- **Local LLM Support**: Full OLLAMA integration for privacy and cost efficiency
-- **Multiple Search Strategies**: Auto, vector-only, graph-only, and hybrid modes
-- **Production Ready**: Docker Compose setup with nginx, health checks, and security
-- **Easy Setup**: Automated scripts for quick deployment
-- **Comprehensive Validation**: Input sanitization and error handling
+- **Graph-Based Asset Modeling**: Industrial hierarchy (Site → Area → Line → Machine → Sensor) represented as a connected graph
+- **Semantic Extensibility**: Support for RDF/OWL ontologies via Neo4j's n10s plugin
+- **Time-Series Integration**: High-performance sensor data storage with InfluxDB
+- **Real-Time Messaging**: MQTT broker for industrial IoT communication
+- **Unified API**: RESTful API providing access to both graph and time-series data
+- **Visualization**: Grafana dashboards for operational insights
+- **Containerized**: Complete Docker-based development environment
 
 ## 🏗️ Architecture
 
-1. **Vector Database**: Qdrant (fast, scalable, Docker-native)
-2. **Knowledge Graph**: Neo4j (industry standard for graph databases)
-3. **LLM Interface**: OpenAI API (GPT-4) or local models via Ollama
-4. **Query Router**: Intelligent routing between vector and graph search
-5. **Context Synthesizer**: Combines results from both sources
-6. **API Gateway**: FastAPI-based REST interface
+### Technology Stack
 
-![image](assets/hybridRAG.png)
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Graph Database | Neo4j Community + n10s plugin | Asset hierarchy and relationships |
+| Time-Series DB | InfluxDB 2.0 | High-performance sensor data storage |
+| Message Broker | EMQX | MQTT communication |
+| API Gateway | FastAPI | Unified REST API |
+| Visualization | Grafana | Dashboards and analytics |
+| Containerization | Docker Compose | Development environment |
 
-## 📋 Prerequisites
+### Architecture Decision Process
 
-- Docker and Docker Compose
-- At least 8GB RAM (for OLLAMA models)
-- 20GB free disk space
+We evaluated multiple approaches for the UNS implementation:
 
-## 🛠️ Quick Start
+#### 1. RDF Triple Store + SPARQL
+*Examples: Apache Jena, Blazegraph, GraphDB*
 
-### 1. Clone and Setup
+**Pros:**
+- Standards-based (RDF, OWL, RDFS)
+- Rich semantic modeling capabilities
+- Excellent interoperability with industrial standards
+- Built-in reasoning capabilities
 
-```bash
-git clone <repository-url>
-cd HybridRag
+**Cons:**
+- Verbose modeling and querying
+- Steep learning curve for developers
+- Limited visualization tools
+- Performance concerns for large datasets
+
+#### 2. Property Graph + Cypher
+*Examples: Neo4j, Memgraph, ArangoDB*
+
+**Pros:**
+- Intuitive object modeling
+- Developer-friendly query language
+- Strong visualization ecosystem
+- Excellent traversal performance
+
+**Cons:**
+- Limited semantic web standards support
+- Requires additional tooling for ontology management
+- Vendor-specific query languages
+
+#### 3. Multi-Model Database
+*Examples: ArangoDB, Amazon Neptune*
+
+**Pros:**
+- Single database for multiple data models
+- Unified query language
+- Operational simplicity
+
+**Cons:**
+- Less mature ecosystem
+- Limited semantic capabilities
+- Fewer specialized tools
+
+#### 4. Hybrid Approach (Our Choice)
+*Neo4j + n10s plugin + InfluxDB*
+
+**Selected for:**
+- **Rapid Development**: Cypher provides intuitive graph querying
+- **Semantic Extensibility**: n10s plugin enables RDF/OWL import
+- **Performance**: Dedicated time-series storage with InfluxDB
+- **Ecosystem**: Rich tooling and visualization options
+- **Future-Proofing**: Can evolve to full semantic web standards
+
+### Data Flow Architecture
+
+```
+Industrial Systems → MQTT Broker → Data Router
+                                      ├── Neo4j (Asset Graph)
+                                      └── InfluxDB (Time Series)
+                                           ↓
+                                      Unified API
+                                           ↓
+                                   Grafana Dashboards
 ```
 
-### 2. Run Setup Script
+## 📊 Data Models
 
-```bash
-# Make scripts executable (Linux/Mac)
-chmod +x scripts/*.sh
+### Graph Schema
 
-# Run setup (Windows)
-./scripts/setup.sh
-```
+The graph models the industrial hierarchy using the following node types:
 
-The setup script will:
-- Create necessary directories
-- Set up environment variables
-- Pull OLLAMA models (llama2, nomic-embed-text)
-- Start all services
+- **Site**: Top-level facility (e.g., manufacturing plant)
+- **Asset**: Generic industrial asset (Area, Line, Machine, etc.)
+- **Sensor**: Measurement devices attached to assets
 
-### 3. Manual Setup (Alternative)
+**Relationship Types:**
+- `CONTAINS`: Hierarchical containment (Site contains Areas, etc.)
+- `HAS_SENSOR`: Asset to sensor relationships
+- `CONNECTS_TO`: Equipment interconnections
+- `PART_OF`: Component relationships
 
-```bash
-# Copy environment file
-cp env.example .env
+### Time-Series Schema
 
-# Edit configuration
-nano .env
+InfluxDB stores sensor measurements with the following structure:
 
-# Start services
-docker-compose up -d
+- **measurement**: `sensor_data`
+- **tags**: `site`, `area`, `line`, `machine`, `sensor_type`, `unit`
+- **fields**: `value`, `quality`, `status`
+- **time**: `timestamp`
 
-# Pull OLLAMA models
-./scripts/update-models.sh
-```
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Docker 20.10+ and Docker Compose 2.0+
+- 4GB+ available RAM
+- Ports 7474, 7687, 8086, 1883, 3000, 8000 available
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd uns-graph-poc
+   ```
+
+2. **Run the setup script**
+   ```bash
+   chmod +x setup.sh
+   ./setup.sh
+   ```
+
+   The setup script will:
+   - Create project structure
+   - Generate secure tokens
+   - Configure services
+   - Build and start containers
+   - Initialize sample data
+
+3. **Access the services**
+   - Neo4j Browser: http://localhost:7474
+   - InfluxDB UI: http://localhost:8086
+   - Grafana: http://localhost:3000
+   - UNS API: http://localhost:8000
+
+### Manual Setup
+
+If you prefer manual setup:
+
+1. **Copy environment file**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+2. **Start services**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Initialize data**
+   ```bash
+   # Wait for services to start, then run initialization
+   ./scripts/init-data.sh
+   ```
 
 ## 🔧 Configuration
 
 ### Environment Variables
 
-Create a `.env` file based on `env.example`:
+Key configuration options in `.env`:
 
 ```bash
-# Environment
-ENVIRONMENT=development
-LOG_LEVEL=INFO
+# Database Credentials
+NEO4J_PASSWORD=your_secure_password
+INFLUXDB_PASSWORD=your_secure_password
+INFLUXDB_TOKEN=your_secure_token
 
-# Neo4j Configuration
-NEO4J_AUTH=neo4j/password123
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=password123
+# Service Ports
+NEO4J_HTTP_PORT=7474
+INFLUXDB_PORT=8086
+MQTT_PORT=1883
 
-# OpenAI Configuration (Optional)
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Ollama Configuration
-OLLAMA_BASE_URL=http://localhost:11434
+# Security
+JWT_SECRET=your_jwt_secret
 ```
 
-### OLLAMA Models
+### Service Configuration
 
-The system uses these models by default:
-- **Language Model**: `llama2:7b-chat-q4_0` (fast, efficient)
-- **Embedding Model**: `nomic-embed-text` (high quality embeddings)
+- **Neo4j**: Configuration in `neo4j/init/`
+- **InfluxDB**: Auto-configured via environment variables
+- **EMQX**: Configuration via environment variables and EMQX Dashboard (http://localhost:18083)
+- **Grafana**: Provisioning in `grafana/provisioning/`
 
-To update models:
+## 📈 Usage Examples
+
+### Graph Queries
+
+**Find all sensors in a plant:**
+```cypher
+MATCH (s:Site {name: 'PlantA'})-[:CONTAINS*]->(sensor:Sensor)
+RETURN sensor.name, sensor.type, sensor.unit
+```
+
+**Get equipment hierarchy:**
+```cypher
+MATCH path = (site:Site)-[:CONTAINS*]->(asset:Asset)
+RETURN site.name, [node in nodes(path) | node.name] as hierarchy
+```
+
+**Find machines with temperature sensors:**
+```cypher
+MATCH (machine:Asset {type: 'machine'})-[:HAS_SENSOR]->(sensor:Sensor {type: 'temperature'})
+RETURN machine.name, sensor.name, sensor.unit
+```
+
+### Time-Series Queries
+
+**Recent sensor readings:**
+```sql
+SELECT * FROM sensor_data 
+WHERE time > now() - 1h 
+AND site = 'PlantA'
+```
+
+**Aggregated data by machine:**
+```sql
+SELECT mean(value) as avg_value
+FROM sensor_data 
+WHERE time > now() - 24h 
+GROUP BY machine, sensor_type
+```
+
+### API Usage
+
+**Get asset hierarchy:**
 ```bash
-./scripts/update-models.sh
+curl http://localhost:8000/api/v1/assets/hierarchy/PlantA
 ```
 
-## 🚀 Usage
-
-### API Endpoints
-
-#### Query the System
+**Query sensor data:**
 ```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What is machine learning?",
-    "max_results": 10,
-    "search_strategy": "auto",
-    "include_reasoning": true
-  }'
+curl "http://localhost:8000/api/v1/sensors/TempSensor1/data?hours=24"
 ```
 
-#### Ingest Documents
+**Generate MQTT topics:**
 ```bash
-curl -X POST "http://localhost:8000/ingest" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "documents": [
-      {
-        "content": "Machine learning is a subset of artificial intelligence...",
-        "metadata": {"source": "wikipedia", "topic": "AI"},
-        "entities": ["machine learning", "artificial intelligence"]
-      }
-    ],
-    "source": "api"
-  }'
+curl http://localhost:8000/api/v1/topics/generate
 ```
 
-#### Get System Stats
+## 🔌 Integration
+
+### MQTT Topic Structure
+
+The system generates hierarchical MQTT topics based on the asset structure stored in the graph database:
+
+```
+{site}/{area}/{line}/{machine}/{sensor_type}/{metric_type}
+```
+
+**Examples:**
+- `PlantA/Area1/Line1/Machine1/temperature/value`
+- `PlantA/Area1/Line1/Machine1/temperature/quality`
+- `PlantA/Area1/Line1/Machine1/pressure/value`
+- `PlantA/Area2/Line2/Machine2/vibration/alarm`
+
+### Topic Generation Rules
+
+1. **Hierarchical Path**: Generated from graph traversal (Site → Area → Line → Machine)
+2. **Sensor Type**: Based on the sensor's `type` property
+3. **Metric Type**: Common suffixes include:
+   - `value` - Primary measurement
+   - `quality` - Data quality indicator
+   - `status` - Equipment status
+   - `alarm` - Alarm conditions
+   - `setpoint` - Control setpoints
+
+### Data Publishers
+
+**Python Example:**
+```python
+import paho.mqtt.client as mqtt
+import json
+from datetime import datetime
+
+def publish_sensor_data(client, site, area, line, machine, sensor_type, value):
+    topic = f"{site}/{area}/{line}/{machine}/{sensor_type}/value"
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "value": value,
+        "quality": "good",
+        "source": "sensor_gateway"
+    }
+    client.publish(topic, json.dumps(payload))
+
+# Usage
+client = mqtt.Client()
+client.connect("localhost", 1883, 60)
+publish_sensor_data(client, "PlantA", "Area1", "Line1", "Machine1", "temperature", 75.2)
+```
+
+**Node.js Example:**
+```javascript
+const mqtt = require('mqtt');
+const client = mqtt.connect('mqtt://localhost:1883');
+
+function publishSensorData(site, area, line, machine, sensorType, value) {
+    const topic = `${site}/${area}/${line}/${machine}/${sensorType}/value`;
+    const payload = {
+        timestamp: new Date().toISOString(),
+        value: value,
+        quality: 'good',
+        source: 'plc_gateway'
+    };
+    client.publish(topic, JSON.stringify(payload));
+}
+
+// Usage
+publishSensorData('PlantA', 'Area1', 'Line1', 'Machine1', 'pressure', 2.5);
+```
+
+## 🧪 Testing
+
+### Unit Tests
+
+Run the test suite:
 ```bash
-curl "http://localhost:8000/stats"
+docker-compose exec api pytest tests/
 ```
 
-### Service URLs
+### Integration Tests
 
-- **API Documentation**: http://localhost:8000/docs
-- **Neo4j Browser**: http://localhost:7474
-- **Qdrant Dashboard**: http://localhost:6333
-- **OLLAMA API**: http://localhost:11434
-
-## 📊 Search Strategies
-
-### Auto (Default)
-The system automatically chooses the best strategy based on query analysis.
-
-### Vector-Only
-Uses only vector similarity search for semantic matching.
-
-### Graph-Only
-Uses only knowledge graph relationships and entity matching.
-
-### Hybrid
-Combines both vector and graph search, then synthesizes results.
-
-## 🔍 Management Scripts
-
+Test the complete data flow:
 ```bash
-# Start all services
-./scripts/start.sh
-
-# Stop all services
-./scripts/stop.sh
-
-# Update OLLAMA models
-./scripts/update-models.sh
-
-# View logs
-docker-compose logs -f
-
-# Restart specific service
-docker-compose restart app
+./scripts/test-integration.sh
 ```
 
-## 🛡️ Security Features
+### Load Testing
 
-- **Input Validation**: All inputs are sanitized and validated
-- **Rate Limiting**: API endpoints are rate-limited via nginx
-- **Security Headers**: XSS protection, content type validation
-- **Environment Variables**: No hardcoded credentials
-- **CORS Configuration**: Configurable cross-origin settings
+Simulate high-volume data ingestion:
+```bash
+./scripts/load-test.sh --sensors 1000 --duration 60s
+```
 
-## 📈 Monitoring
+## 📊 Monitoring
 
 ### Health Checks
-All services include health check endpoints:
-- App: `GET /health`
-- Neo4j: Port 7474
-- Qdrant: Port 6333
-- OLLAMA: Port 11434
 
-### Logging
-Structured logging with different levels:
+The system provides health check endpoints:
+
 ```bash
-# View app logs
-docker-compose logs -f app
+# API Health
+curl http://localhost:8000/health
 
-# View all logs
-docker-compose logs -f
+# Neo4j Health
+curl http://localhost:7474/db/neo4j/tx/commit
+
+# InfluxDB Health
+curl http://localhost:8086/health
+```
+
+### Metrics
+
+Key metrics are exposed via Prometheus endpoints:
+
+- **Message Throughput**: MQTT messages per second
+- **Query Performance**: Graph and time-series query latency
+- **Data Quality**: Sensor data quality indicators
+- **System Health**: Service availability and resource usage
+
+## 🚀 Deployment
+
+### Production Considerations
+
+1. **Security**:
+   - Enable authentication for all services
+   - Use TLS/SSL for all communications
+   - Configure firewall rules
+   - Implement API rate limiting
+
+2. **High Availability**:
+   - Neo4j clustering for graph database
+   - InfluxDB clustering for time-series data
+   - MQTT broker clustering with load balancing
+   - Container orchestration with Kubernetes
+
+3. **Scalability**:
+   - Horizontal scaling of API services
+   - Sharding strategies for large datasets
+   - Caching layer for frequently accessed data
+   - Message queue for high-volume ingestion
+
+### Docker Swarm Deployment
+
+```bash
+# Initialize swarm
+docker swarm init
+
+# Deploy stack
+docker stack deploy -c docker-compose.prod.yml uns-stack
+```
+
+### Kubernetes Deployment
+
+```bash
+# Apply manifests
+kubectl apply -f k8s/
+
+# Check deployment
+kubectl get pods -n uns-namespace
 ```
 
 ## 🔧 Development
 
-### Local Development
-```bash
-# Install dependencies
-pip install -r app/requirements.txt
+### Adding New Asset Types
 
-# Run locally
-cd app
-python main.py
+1. **Update Graph Schema**:
+   ```cypher
+   CREATE (new_asset:Asset {
+       name: 'NewAssetType',
+       type: 'custom_type',
+       description: 'Custom asset type'
+   })
+   ```
+
+2. **Update API Models**:
+   ```python
+   # In models.py
+   class CustomAsset(BaseModel):
+       name: str
+       type: Literal['custom_type']
+       properties: Dict[str, Any]
+   ```
+
+3. **Add Topic Generation Rules**:
+   ```python
+   # In topic_generator.py
+   def generate_custom_topic(asset_node):
+       # Custom topic generation logic
+       pass
+   ```
+
+### Extending with Ontologies
+
+1. **Import OWL Ontology**:
+   ```cypher
+   CALL n10s.onto.import.fetch(
+       'https://example.com/ontology.owl',
+       'RDF/XML'
+   )
+   ```
+
+2. **Map to Graph Schema**:
+   ```cypher
+   CALL n10s.mapping.add(
+       'https://example.com/ontology#Equipment',
+       'Asset'
+   )
+   ```
+
+## 📚 Documentation
+
+### API Documentation
+
+Interactive API documentation is available at:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### Graph Schema Documentation
+
+Generate schema documentation:
+```bash
+./scripts/generate-schema-docs.sh
 ```
 
-### Testing
-```bash
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=src
-```
-
-## 🐛 Troubleshooting
+## 🆘 Support
 
 ### Common Issues
 
-1. **OLLAMA Models Not Found**
-   ```bash
-   ./scripts/update-models.sh
-   ```
-
-2. **Services Not Starting**
-   ```bash
-   docker-compose logs
-   docker-compose down -v
-   ./scripts/setup.sh
-   ```
-
-3. **Memory Issues**
-   - Reduce model sizes in `scripts/update-models.sh`
-   - Increase Docker memory limits
-
-4. **Port Conflicts**
-   - Check if ports 8000, 7474, 6333, 11434 are free
-   - Modify ports in `docker-compose.yml`
-
-### Performance Tuning
-
-- **For Development**: Use `llama2:7b-chat-q4_0` (faster)
-- **For Production**: Use `llama2:13b` (better quality)
+1. **Services not starting**: Check Docker logs and port availability
+2. **Connection refused**: Verify service health and network configuration
+3. **Performance issues**: Check resource allocation and query optimization
 
 
-## 📝 TODO Status
-
-✅ **Completed**:
-- Configuration inconsistencies fixed
-- Missing dependencies added
-- Docker build issues resolved
-- OLLAMA integration implemented
-- Automated setup scripts created
-- Production configuration added
-- Input validation implemented
-- Error handling improved
-- Security hardening completed
-
-⏳ **Pending**:
-- Comprehensive testing
-- Monitoring and metrics
-- Caching implementation
-- Backup strategy
-- Performance optimizations
 

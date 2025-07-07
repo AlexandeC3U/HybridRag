@@ -1,0 +1,40 @@
+@prefix : <http://example.org/uns#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+:Asset a owl:Class .
+:Site a owl:Class ; rdfs:subClassOf :Asset .
+:Area a owl:Class ; rdfs:subClassOf :Asset .
+:Line a owl:Class ; rdfs:subClassOf :Asset .
+:Machine a owl:Class ; rdfs:subClassOf :Asset .
+:Sensor a owl:Class .
+
+:contains a owl:ObjectProperty ;
+    rdfs:domain :Asset ;
+    rdfs:range :Asset .
+
+:hasSensor a owl:ObjectProperty ;
+    rdfs:domain :Asset ;
+    rdfs:range :Sensor .
+
+:connectsTo a owl:ObjectProperty ;
+    rdfs:domain :Asset ;
+    rdfs:range :Asset .
+
+:partOf a owl:ObjectProperty ;
+    rdfs:domain :Asset ;
+    rdfs:range :Asset .
+
+# Example data (optional, for demo)
+:PlantA a :Site ; rdfs:label "PlantA" .
+:Area1 a :Area ; rdfs:label "Area1" .
+:Line1 a :Line ; rdfs:label "Line1" .
+:Machine1 a :Machine ; rdfs:label "Machine1" .
+:TempSensor1 a :Sensor ; rdfs:label "TempSensor1" .
+
+:PlantA :contains :Area1 .
+:Area1 :contains :Line1 .
+:Line1 :contains :Machine1 .
+:Machine1 :hasSensor :TempSensor1 . 
